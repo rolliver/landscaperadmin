@@ -12,12 +12,7 @@ services:
   backend:
     build:
       context: ./backend
-    environment:
-      DB_HOST: db
-      DB_NAME: landscaping_scheduler
-      DB_USER: lsadmin
-      DB_PASSWORD: wVaxVojCbomBaQakxe2X
-      DB_PORT: 5432
+    env_file: ./backend/settings.env
     ports:
       - "5001:5000"
     depends_on:

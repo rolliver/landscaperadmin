@@ -177,17 +177,43 @@ const handleDeleteClick = (job) => {
   };
 
   return (
+    <div>
     <div className="JobsList">
       <h1>Jobs List</h1>
-      <ul>
-        {jobs.map((job) => (
-          <li key={job.job_id}>
-            {job.address} {job.city_name} {job.state_name} {job.postal_code}  {job.duration} mins - {job.date} - {job.start_time}
-            <button onClick={() => handleEditClick(job)}>Edit</button>
-            <button onClick={() => handleDeleteClick(job)}>Delete</button>
-          </li>
-        ))}
-      </ul>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Start Time</th>
+            <th>Address</th>
+            <th>City</th>
+            <th>State</th>
+            <th>Postal Code</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Duration (mins)</th>
+            <th>Tasks</th>
+            <th>Validated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.map((job) => (
+            <tr key={job.job_id}>
+              <td>{job.date}</td>
+              <td>{job.start_time}</td>
+              <td>{job.address}</td>
+              <td>{job.city_name}</td>
+              <td>{job.state_name}</td>
+              <td>{job.postal_code}</td>
+              <td>{job.latitude}</td>
+              <td>{job.longitude}</td>
+              <td>{job.duration}</td>
+              <td>{job.tasks.join(', ')}</td>
+              <td>{job.validated ? 'Yes' : 'No'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <h2>{editingJob ? 'Edit Job' : 'Add New Job'}</h2>
       <form onSubmit={handleSubmit}>
@@ -264,6 +290,7 @@ const handleDeleteClick = (job) => {
         <button type="submit">Add Job</button>
       </form>
     </div>
+  </div>
   );
 }
 

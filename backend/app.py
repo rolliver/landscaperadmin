@@ -6,8 +6,8 @@ import logging
 import requests
 from datetime import time
 
+GOOGLE_MAPS_API_KEY=os.environ['GOOGLE_MAPS_API_KEY']
 
-GOOGLE_MAPS_API_KEY='AIzaSyAAuqTNLZc20C3uDclDsoXwmd8h5GfwWg8'
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -18,13 +18,12 @@ CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 def get_db_connection():
     conn = psycopg2.connect(
         host=os.getenv('DB_HOST', 'db'),
-        database=os.getenv('DB_NAME', 'landscaping_scheduler'),
-        user=os.getenv('DB_USER', 'lsadmin'),
-        password=os.getenv('DB_PASSWORD', 'wVaxVojCbomBaQakxe2X'),
-        port=os.getenv('DB_PORT', '5432')
+        database=os.getenv('DB_NAME'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        port=os.getenv('DB_PORT')
     )
     return conn
-
 def get_coordinates(address):
     url = f"https://maps.googleapis.com/maps/api/geocode/json?address={address}&key={GOOGLE_MAPS_API_KEY}"
     response = requests.get(url)
@@ -46,7 +45,8 @@ def get_jobs():
             SELECT 
                 j.job_id, 
                 j.address, 
-                j.coordinates, 
+                ST_X(j.coordinates::geometry) AS longitude,
+                ST_Y(j.coordinates::geometry) AS latitude,
                 j.duration, 
                 j.tasks, 
                 j.date, 
@@ -63,6 +63,8 @@ def get_jobs():
                 cities c ON pc.city_id = c.city_id
             JOIN 
                 states s ON c.state_id = s.state_id
+            ORDER BY 
+                j.date ASC  -- Sort by date
         ''')
         jobs = cursor.fetchall()
         cursor.close()
@@ -73,15 +75,16 @@ def get_jobs():
             jobs_list.append({
                 'job_id': job[0],
                 'address': job[1],
-                'coordinates': job[2],
-                'duration': job[3],
-                'tasks': job[4].split(','),  # Convert tasks string back to a list
-                'date': job[5].isoformat(),  # Convert date to string
-                'start_time': job[6].strftime('%H:%M:%S') if isinstance(job[6], time) else job[6],  # Convert time to string
-                'validated': job[7],
-                'postal_code': job[8],
-                'city_name': job[9],
-                'state_name': job[10]
+                'latitude': job[2],
+                'longitude': job[3],
+                'duration': job[4],
+                'tasks': job[5].split(','),  # Convert tasks string back to a list
+                'date': job[6].isoformat(),  # Convert date to string
+                'start_time': job[7].strftime('%H:%M:%S') if isinstance(job[6], time) else job[6],  # Convert time to string
+                'validated': job[8],
+                'postal_code': job[9],
+                'city_name': job[10],
+                'state_name': job[11]
             })
 
         return jsonify(jobs_list)
@@ -130,7 +133,6 @@ def add_job():
         state_id = state[0]
 
         # Retrieve the city_id from the city_name and state_id
-        logging.info("SELECT city_id FROM cities WHERE city_name = %s AND state_id = %s", (city_name, state_id))
         cursor.execute("SELECT city_id FROM cities WHERE city_name = %s AND state_id = %s", (city_name, state_id))
         city = cursor.fetchone()
         if not city:
