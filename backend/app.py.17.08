@@ -1,0 +1,66 @@
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import psycopg2
+import os
+
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+
+def get_db_connection():
+    conn = psycopg2.connect(
+        host=os.getenv('DB_HOST', 'db'),
+        database=os.getenv('DB_NAME', 'landscaping_scheduler'),
+        user=os.getenv('DB_USER', 'lsadmin'),
+        password=os.getenv('DB_PASSWORD', 'wVaxVojCbomBaQakxe2X'),
+        port=os.getenv('DB_PORT', '5432')
+    )
+    return conn
+
+@app.route('/jobs', methods=['GET'])
+def get_jobs():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT job_id, address, duration, street_name FROM jobs')
+        jobs = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        jobs_list = []
+        for job in jobs:
+            jobs_list.append({
+                "job_id": job[0],
+                "address": job[1],
+                "duration": job[2],
+                "street_name": job[3]
+            })
+
+        return jsonify(jobs_list)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500  # Catch and return any errors
+
+# New route to add a job
+@app.route('/jobs', methods=['POST'])
+def add_job():
+    new_job = request.json  # Get JSON data from the POST request
+    address = new_job['address']
+    duration = new_job['duration']
+    street_name = new_job.get('street_name', '')
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO jobs (address, duration, street_name) VALUES (%s, %s, %s)',
+            (address, duration, street_name)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Job added successfully!"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500  # Catch and return any errors
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001)
+
