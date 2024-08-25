@@ -1,4 +1,5 @@
-./backend/settings.env
+backend/settings.env
 .venv
-./dbback/
+dbback/*
+.vscode
 
