@@ -15,6 +15,121 @@ logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
+@app.route('/customers', methods=['GET'])
+def get_customers():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT 
+                c.customer_id, 
+                c.first_name, 
+                c.last_name, 
+                c.email, 
+                c.phone_number, 
+                c.address, 
+                ci.city_name, 
+                s.state_name, 
+                pc.postal_code
+            FROM 
+                customers c
+            LEFT JOIN 
+                cities ci ON c.city_id = ci.city_id
+            LEFT JOIN 
+                states s ON c.state_id = s.state_id
+            LEFT JOIN 
+                postal_codes pc ON c.postal_code_id = pc.postal_code_id
+        ''')
+        customers = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return jsonify([{
+            'customer_id': customer[0],
+            'first_name': customer[1],
+            'last_name': customer[2],
+            'email': customer[3],
+            'phone_number': customer[4],
+            'address': customer[5],
+            'city': customer[6],
+            'state': customer[7],
+            'postal_code': customer[8]
+        } for customer in customers]), 200
+    except Exception as e:
+        logging.error(f"Error fetching customers: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@app.route('/customers', methods=['POST'])
+def add_customer():
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO customers (first_name, last_name, email, phone_number, address, city_id, state_id, postal_code_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING customer_id
+        ''', (
+            data['first_name'],
+            data['last_name'],
+            data.get('email'),
+            data.get('phone_number'),
+            data.get('address'),
+            data.get('city_id'),
+            data.get('state_id'),
+            data.get('postal_code_id')
+        ))
+        new_customer_id = cursor.fetchone()[0]
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"customer_id": new_customer_id}), 201
+    except Exception as e:
+        logging.error(f"Error adding customer: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@app.route('/customers/<uuid:customer_id>', methods=['PUT'])
+def update_customer(customer_id):
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE customers
+            SET first_name = %s, last_name = %s, email = %s, phone_number = %s, address = %s, city_id = %s, state_id = %s, postal_code_id = %s
+            WHERE customer_id = %s
+        ''', (
+            data['first_name'],
+            data['last_name'],
+            data.get('email'),
+            data.get('phone_number'),
+            data.get('address'),
+            data.get('city_id'),
+            data.get('state_id'),
+            data.get('postal_code_id'),
+            customer_id
+        ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Customer updated successfully"}), 200
+    except Exception as e:
+        logging.error(f"Error updating customer: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@app.route('/customers/<uuid:customer_id>', methods=['DELETE'])
+def delete_customer(customer_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM customers WHERE customer_id = %s', (customer_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Customer deleted successfully"}), 200
+    except Exception as e:
+        logging.error(f"Error deleting customer: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
 def get_db_connection():
     conn = psycopg2.connect(
         host=os.getenv('DB_HOST', 'db'),
@@ -35,6 +150,12 @@ def get_coordinates(address):
         else:
             logging.error(f"Geocoding failed with status: {data['status']}")
     return None, None
+
+@app.route('/status', methods=['GET'])
+def get_status():
+    return jsonify({"status": "ok"}), 200
+
+
 
 @app.route('/jobs', methods=['GET'])
 def get_jobs():
@@ -305,6 +426,84 @@ def get_cities():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/states', methods=['POST'])
+def add_state():
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO states (state_name, state_abbreviation)
+            VALUES (%s, %s)
+            RETURNING state_id
+        ''', (data['state_name'], data['state_abbreviation']))
+        new_state_id = cursor.fetchone()[0]
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"state_id": new_state_id}), 201
+    except Exception as e:
+        logging.error(f"Error adding state: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@app.route('/states/<int:state_id>', methods=['PUT'])
+def update_state(state_id):
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE states
+            SET state_name = %s, state_abbreviation = %s
+            WHERE state_id = %s
+        ''', (data['state_name'], data['state_abbreviation'], state_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "State updated successfully"}), 200
+    except Exception as e:
+        logging.error(f"Error updating state: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@app.route('/cities', methods=['POST'])
+def add_city():
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO cities (city_name, state_id)
+            VALUES (%s, %s)
+            RETURNING city_id
+        ''', (data['city_name'], data['state_id']))
+        new_city_id = cursor.fetchone()[0]
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"city_id": new_city_id}), 201
+    except Exception as e:
+        logging.error(f"Error adding city: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@app.route('/cities/<int:city_id>', methods=['PUT'])
+def update_city(city_id):
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE cities
+            SET city_name = %s, state_id = %s
+            WHERE city_id = %s
+        ''', (data['city_name'], data['state_id'], city_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "City updated successfully"}), 200
+    except Exception as e:
+        logging.error(f"Error updating city: {str(e)}")
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 

@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   frontend:
+    container_name: frontend
     build:
       context: ./frontend
     ports:
@@ -12,6 +13,7 @@ services:
   backend:
     build:
       context: ./backend
+    container_name: backend
     env_file: ./backend/settings.env
     ports:
       - "5001:5000"
@@ -20,6 +22,7 @@ services:
 
   db:
     image: postgis/postgis
+    container_name: db
     environment:
       POSTGRES_DB: landscaping_scheduler
       POSTGRES_USER: lsadmin
