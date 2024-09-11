@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
-function AddStateForm() {
+function AddStateForm({ onStateAdded }) {
   const [stateName, setStateName] = useState('');
   const [stateAbbr, setStateAbbr] = useState('');
 
@@ -16,9 +16,9 @@ function AddStateForm() {
     axios.post('http://localhost:5001/states', stateData)
       .then(response => {
         console.log('State added successfully:', response.data);
-        // Optionally clear the form or provide feedback
         setStateName('');
         setStateAbbr('');
+        if (onStateAdded) onStateAdded(); // Call the callback function
       })
       .catch(error => {
         console.error('Error adding state:', error);

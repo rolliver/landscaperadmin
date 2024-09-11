@@ -5,6 +5,8 @@ import os
 import logging
 import requests
 from datetime import time
+import uuid  # Add this import at the top of your file
+import psycopg2.extras
 
 GOOGLE_MAPS_API_KEY=os.environ['GOOGLE_MAPS_API_KEY']
 
@@ -14,6 +16,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+
+psycopg2.extras.register_uuid()
 
 @app.route('/customers', methods=['GET'])
 def get_customers():
@@ -138,6 +142,7 @@ def get_db_connection():
         password=os.getenv('DB_PASSWORD'),
         port=os.getenv('DB_PORT')
     )
+    conn.cursor_factory = psycopg2.extras.DictCursor
     return conn
 def get_coordinates(address):
     url = f"https://maps.googleapis.com/maps/api/geocode/json?address={address}&key={GOOGLE_MAPS_API_KEY}"
@@ -159,34 +164,50 @@ def get_status():
 
 @app.route('/jobs', methods=['GET'])
 def get_jobs():
+    print("Entering get_jobs function")  # Debug print
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT 
-                j.job_id, 
-                j.address, 
+        query = '''
+            SELECT
+                j.job_id,
+                j.address,
                 ST_X(j.coordinates::geometry) AS longitude,
                 ST_Y(j.coordinates::geometry) AS latitude,
-                j.duration, 
-                j.tasks, 
-                j.date, 
-                j.start_time, 
-                j.validated, 
-                pc.postal_code, 
-                c.city_name, 
-                s.state_name
-            FROM 
+                j.duration,
+                j.date,
+                j.start_time,
+                j.validated,
+                pc.postal_code,
+                c.city_name,
+                s.state_name,
+                array_agg(jt.task_description) AS tasks
+            FROM
                 jobs j
-            JOIN 
+            LEFT JOIN
                 postal_codes pc ON j.postal_code_id = pc.postal_code_id
-            JOIN 
+            LEFT JOIN
                 cities c ON pc.city_id = c.city_id
-            JOIN 
+            LEFT JOIN
                 states s ON c.state_id = s.state_id
-            ORDER BY 
-                j.date ASC  -- Sort by date
-        ''')
+            LEFT JOIN
+                job_tasks jt ON j.job_id = jt.job_id
+            GROUP BY
+                j.job_id,
+                j.address,
+                j.coordinates,
+                j.duration,
+                j.date,
+                j.start_time,
+                j.validated,
+                pc.postal_code,
+                c.city_name,
+                s.state_name
+            ORDER BY
+                j.date ASC
+        '''
+        print(f"Executing query: {query}")  # Debug print
+        cursor.execute(query)
         jobs = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -194,36 +215,35 @@ def get_jobs():
         jobs_list = []
         for job in jobs:
             jobs_list.append({
-                'job_id': job[0],
+                'job_id': str(job[0]),
                 'address': job[1],
-                'latitude': job[2],
-                'longitude': job[3],
+                'longitude': float(job[2]) if job[2] is not None else None,
+                'latitude': float(job[3]) if job[3] is not None else None,
                 'duration': job[4],
-                'tasks': job[5].split(','),  # Convert tasks string back to a list
-                'date': job[6].isoformat(),  # Convert date to string
-                'start_time': job[7].strftime('%H:%M:%S') if isinstance(job[6], time) else job[6],  # Convert time to string
-                'validated': job[8],
-                'postal_code': job[9],
-                'city_name': job[10],
-                'state_name': job[11]
+                'date': job[5].isoformat() if job[5] else None,
+                'start_time': job[6].strftime('%H:%M:%S') if job[6] else None,
+                'validated': job[7],
+                'postal_code': job[8],
+                'city_name': job[9],
+                'state_name': job[10],
+                'tasks': job[11] if job[11] else []
             })
 
         return jsonify(jobs_list)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500  # Catch and return any errors
+        print(f"Error in get_jobs: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/jobs', methods=['POST'])
-
 def add_job():
     try:
         new_job = request.json
         address = new_job['address']
         duration = new_job['duration']
-        tasks = ','.join(new_job['tasks'])  # Join tasks into a comma-separated string
+        tasks = new_job['tasks']
         date = new_job.get('date')
         start_time = new_job.get('start_time')
         postal_code = new_job['postal_code']
-        # Set default city and state
         city_name = new_job.get('city_name')
         state_name = new_job.get('state_name')
 
@@ -241,16 +261,11 @@ def add_job():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Log the state name for debugging
-        logging.info(f"State name received: '{state_name}'")
-
         # Retrieve the state_id from the state_name
         cursor.execute("SELECT state_id FROM states WHERE state_name = %s", (state_name,))
         state = cursor.fetchone()
         if not state:
-            logging.info(f"State name not found: '{state_name}'")
             return jsonify({"error": "State not found."}), 400
-
         state_id = state[0]
 
         # Retrieve the city_id from the city_name and state_id
@@ -266,22 +281,40 @@ def add_job():
         if not postal_code_result:
 
             cursor.execute('INSERT INTO postal_codes (postal_code, city_id) VALUES (%s, %s) RETURNING postal_code_id', (postal_code, city_id))
-            postal_code = cursor.fetchone()[0]
+            postal_code_id = cursor.fetchone()[0]
         else:
-            postal_code = postal_code_result[0]
+            postal_code_id = postal_code_result[0]
 
 
         # Insert the job
         cursor.execute('''
-            INSERT INTO jobs (job_id, address, coordinates, duration, tasks, date, start_time, postal_code_id, validated)
-            VALUES (uuid_generate_v4(), %s, ST_GeogFromText(%s), %s, %s, %s, %s, %s, %s)
-        ''', (address, coordinates, duration, tasks, date, start_time, postal_code, validated))
+            INSERT INTO jobs (address, coordinates, duration, date, start_time, postal_code_id, validated)
+            VALUES (%s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s, %s, %s)
+            RETURNING job_id
+        ''', (address, longitude, latitude, duration, date, start_time, postal_code_id, validated))
+        job_id = cursor.fetchone()[0]
+
+        # Insert job tasks
+        for task in tasks:
+            # Check if the task already exists
+            cursor.execute('SELECT task_id FROM tasks WHERE task_name = %s', (task,))
+            existing_task = cursor.fetchone()
+            if existing_task:
+                task_id = existing_task[0]
+            else:
+                # If the task doesn't exist, insert it
+                cursor.execute('INSERT INTO tasks (task_name) VALUES (%s) RETURNING task_id', (task,))
+                task_id = cursor.fetchone()[0]
+
+            # Now insert into job_tasks
+            cursor.execute('INSERT INTO job_tasks (job_id, task_id, task_description) VALUES (%s, %s, %s)', 
+                           (job_id, task_id, task))
+
         conn.commit()
         cursor.close()
         conn.close()
 
-        logging.info(f"Job added successfully for address '{address}' with postal code ID '{postal_code}'.")
-        return jsonify({"message": "Job added successfully!"}), 201
+        return jsonify({"message": "Job added successfully!", "job_id": job_id}), 201
 
     except Exception as e:
         logging.exception("An error occurred while adding the job.")
@@ -294,7 +327,7 @@ def update_job(job_id):
 
         address = updated_job.get('address')
         duration = updated_job.get('duration')
-        tasks = updated_job.get('tasks', '')
+        tasks = updated_job.get('tasks', [])
         date = updated_job.get('date')
         start_time = updated_job.get('start_time')
         postal_code = updated_job.get('postal_code')
@@ -328,21 +361,39 @@ def update_job(job_id):
             return jsonify({"error": "City not found."}), 400
         city_id = city[0]
 
-        # Update the job with the new data
+        # Check if the postal code exists, if not, add it
+        cursor.execute('SELECT postal_code_id FROM postal_codes WHERE postal_code = %s', (postal_code,))
+        postal_code_result = cursor.fetchone()
+        if not postal_code_result:
+
+            cursor.execute('INSERT INTO postal_codes (postal_code, city_id) VALUES (%s, %s) RETURNING postal_code_id', (postal_code, city_id))
+            postal_code_id = cursor.fetchone()[0]
+        else:
+            postal_code_id = postal_code_result[0]
+
+        # Update job details
         cursor.execute('''
             UPDATE jobs
-            SET address = %s,
-                coordinates = ST_GeogFromText(%s),
-                duration = %s,
-                tasks = %s,
-                date = %s,
-                start_time = %s,
-                postal_code_id = %s,
-                validated = %s,
-                city_name = %s,
-                state_name = %s
+            SET address = %s, coordinates = ST_SetSRID(ST_MakePoint(%s, %s), 4326), duration = %s, date = %s, start_time = %s, postal_code_id = %s, validated = %s
             WHERE job_id = %s
-        ''', (address, coordinates, duration, tasks, date, start_time, postal_code, validated, city_name, state_name, job_id))
+        ''', (address, longitude, latitude, duration, date, start_time, postal_code_id, validated, job_id))
+
+        # Update job tasks
+        cursor.execute('DELETE FROM job_tasks WHERE job_id = %s', (str(job_id),))
+        for task in tasks:
+            # Check if the task already exists
+            cursor.execute('SELECT task_id FROM tasks WHERE task_name = %s', (task,))
+            existing_task = cursor.fetchone()
+            if existing_task:
+                task_id = existing_task[0]
+            else:
+                # If the task doesn't exist, insert it
+                cursor.execute('INSERT INTO tasks (task_name) VALUES (%s) RETURNING task_id', (task,))
+                task_id = cursor.fetchone()[0]
+
+            # Now insert into job_tasks
+            cursor.execute('INSERT INTO job_tasks (job_id, task_id, task_description) VALUES (%s, %s, %s)', 
+                           (job_id, task_id, task))
 
         conn.commit()
         cursor.close()
@@ -353,9 +404,6 @@ def update_job(job_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/jobs/<uuid:job_id>', methods=['DELETE'])
-#def options_job(job_id):
-#    return '', 200
-
 def delete_job(job_id):
     try:
         conn = get_db_connection()

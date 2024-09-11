@@ -34,6 +34,7 @@ unset PGPASSWORD
 # Print completion message
 echo "Backup completed: $BACKUP_FILE"
 
+#docker cp $PWD/dbback/landscaping_scheduler-2024-08-24_21:21:20.sql db:/tmp/
 
 #docker exec -e PGPASSWORD="wVaxVojCbomBaQakxe2X" -t db pg_restore -U lsadmin -d landscaping_scheduler -h db -p 5432 -v "/tmp/backup.sql"
 

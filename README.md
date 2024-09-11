@@ -11,3 +11,6 @@ Run with docker-compose up --build
 
 # Connect to DB
 docker exec -it efe8d2519706 psql -U lsadmin landscaping_scheduler
+
+
+docker volume create pgdata
